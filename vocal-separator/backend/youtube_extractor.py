@@ -12,7 +12,13 @@ from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 
-from .config import YOUTUBE_COOKIES_FILE, YOUTUBE_MAX_DURATION_SECONDS
+from .config import (
+	YOUTUBE_COOKIES_BROWSER,
+	YOUTUBE_COOKIES_BROWSER_PROFILE_DIR,
+	YOUTUBE_COOKIES_FILE,
+	YOUTUBE_COOKIES_KEYRING,
+	YOUTUBE_MAX_DURATION_SECONDS,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,12 +50,30 @@ class VideoUnavailableError(YouTubeExtractionError):
 
 def _cookie_opts() -> dict:
 	"""
-	yt-dlp options to authenticate as a logged-in browser session, if a
-	cookies.txt file has been placed at YOUTUBE_COOKIES_FILE. Works around
-	YouTube's "Sign in to confirm you're not a bot" check, which triggers
-	often on datacenter/server IPs. Absent by default - falls back to
-	cookie-less requests exactly like before.
+	yt-dlp options to authenticate as a logged-in browser session, to work
+	around YouTube's "Sign in to confirm you're not a bot" check (common on
+	datacenter/server IPs). Two sources, checked in this order:
+
+	1. A local browser profile (YOUTUBE_COOKIES_BROWSER + a non-empty
+	   YOUTUBE_COOKIES_BROWSER_PROFILE_DIR mounted from the host) - reads
+	   cookies live, no manual export needed. Reliable only for Firefox-based
+	   browsers; see config.py for why Chromium-based ones usually can't be
+	   decrypted from inside this container.
+	2. A static YOUTUBE_COOKIES_FILE (cookies.txt export).
+
+	Neither configured -> requests go out without cookies, exactly as
+	before.
 	"""
+	profile_dir = Path(YOUTUBE_COOKIES_BROWSER_PROFILE_DIR)
+	if YOUTUBE_COOKIES_BROWSER and profile_dir.is_dir() and any(profile_dir.iterdir()):
+		return {
+			"cookiesfrombrowser": (
+				YOUTUBE_COOKIES_BROWSER,
+				str(profile_dir),
+				YOUTUBE_COOKIES_KEYRING or None,
+				None,
+			)
+		}
 	if Path(YOUTUBE_COOKIES_FILE).is_file():
 		return {"cookiefile": YOUTUBE_COOKIES_FILE}
 	return {}

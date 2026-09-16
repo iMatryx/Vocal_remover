@@ -45,6 +45,12 @@ services:
       - ./backend/uploads:/app/backend/uploads
       - ./backend/outputs:/app/backend/outputs
       - ./backend/cookies:/app/backend/cookies:ro
+      # Each user has a different browser/profile path on their own
+      # machine, so this is set per-deployment via YOUTUBE_BROWSER_PROFILE_HOST_PATH
+      # in vocal-separator/.env (compose-level, not backend/.env). Falls
+      # back to an empty local placeholder dir when unset, so this mount
+      # never breaks a setup that doesn't use it.
+      - ${YOUTUBE_BROWSER_PROFILE_HOST_PATH:-./backend/browser_profile}:/app/backend/browser_profile:ro
     networks:
       - vocal-net
 
@@ -77,6 +83,7 @@ services:
       - ./backend/uploads:/app/backend/uploads
       - ./backend/outputs:/app/backend/outputs
       - ./backend/cookies:/app/backend/cookies:ro
+      - ${YOUTUBE_BROWSER_PROFILE_HOST_PATH:-./backend/browser_profile}:/app/backend/browser_profile:ro
     networks:
       - vocal-net
 

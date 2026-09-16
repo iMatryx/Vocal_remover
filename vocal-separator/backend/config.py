@@ -112,6 +112,34 @@ YOUTUBE_COOKIES_FILE = os.getenv(
 	"YOUTUBE_COOKIES_FILE", str(BASE_DIR / "cookies" / "youtube_cookies.txt")
 )
 
+# Alternative to YOUTUBE_COOKIES_FILE: read cookies live from a local
+# browser's profile instead of a static export. Set to a browser yt-dlp
+# supports (firefox, chrome, chromium, edge, brave, vivaldi, opera, safari,
+# whale) and bind-mount that browser's profile directory into the container
+# at YOUTUBE_COOKIES_BROWSER_PROFILE_DIR - see docker-compose.yml's
+# YOUTUBE_BROWSER_PROFILE_HOST_PATH. Takes priority over YOUTUBE_COOKIES_FILE
+# when both are configured.
+#
+# Only reliable for Firefox-based browsers: Firefox stores cookies
+# unencrypted on disk, but Chromium-based browsers (Chrome, Edge, Brave,
+# Vivaldi, Opera, Whale) encrypt them with a key held by the host OS
+# keychain (macOS Keychain, Windows DPAPI) - a Linux container has no way to
+# reach that, so decryption fails there. On a Linux host, Chromium cookies
+# may still be reachable via YOUTUBE_COOKIES_KEYRING below.
+YOUTUBE_COOKIES_BROWSER = os.getenv("YOUTUBE_COOKIES_BROWSER", "")
+
+# Container-side path where the host browser profile is mounted. Matches
+# docker-compose.yml's mount target by default - only override if you
+# changed that.
+YOUTUBE_COOKIES_BROWSER_PROFILE_DIR = os.getenv(
+	"YOUTUBE_COOKIES_BROWSER_PROFILE_DIR", str(BASE_DIR / "browser_profile")
+)
+
+# Linux-only keyring backend for decrypting Chromium-based browser cookies:
+# BASICTEXT, GNOMEKEYRING, KWALLET, KWALLET5, or KWALLET6. Leave blank for
+# Firefox, which doesn't need one.
+YOUTUBE_COOKIES_KEYRING = os.getenv("YOUTUBE_COOKIES_KEYRING", "")
+
 
 # Basic application logging; LOG_LEVEL can be changed through .env.
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

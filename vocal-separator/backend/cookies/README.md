@@ -1,5 +1,8 @@
 # cookies/
 
+Fallback pentru autentificarea YouTube (vezi și `backend/browser_profile/`
+pentru metoda "live" din browser, care are prioritate dacă e configurată).
+
 Pune aici `youtube_cookies.txt` (format Netscape) exportat dintr-un cont
 YouTube logat, pentru a trece de verificarea anti-bot a YouTube
 ("Sign in to confirm you're not a bot") care apare des la request-uri
@@ -16,3 +19,7 @@ Dacă nu există fișierul, aplicația funcționează la fel ca înainte (fără
 cookies), doar că poate primi eroarea de mai sus.
 
 Calea poate fi schimbată din `.env` cu `YOUTUBE_COOKIES_FILE=/alta/cale.txt`.
+
+Funcționează indiferent de browser sau sistem de operare al gazdei — spre
+deosebire de metoda din `browser_profile/`, care e fiabilă doar pentru
+Firefox.
