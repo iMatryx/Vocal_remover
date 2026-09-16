@@ -246,12 +246,16 @@ class TestPlayerClientSupport:
 class TestPotProviderSupport:
     """extractor_args["youtubepot-bgutilhttp"].base_url should reflect
     YOUTUBE_POT_PROVIDER_BASE_URL, merged alongside (not replacing)
-    player_client, since both live under the single extractor_args dict."""
+    player_client, since both live under the single extractor_args dict.
+    Configuring a provider should also force youtube:fetch_pot, since
+    yt-dlp's own "auto" heuristic can skip fetching even when a client's
+    policy marks a token as required (see _extractor_args' docstring)."""
 
     @staticmethod
-    def _capture_opts(monkeypatch, base_url, clients=None):
+    def _capture_opts(monkeypatch, base_url, clients=None, fetch_policy="always"):
         monkeypatch.setattr(youtube_extractor, "YOUTUBE_POT_PROVIDER_BASE_URL", base_url)
         monkeypatch.setattr(youtube_extractor, "YOUTUBE_PLAYER_CLIENTS", clients or [])
+        monkeypatch.setattr(youtube_extractor, "YOUTUBE_POT_FETCH_POLICY", fetch_policy)
         captured_opts = {}
 
         def fake_init(self, params=None, **kwargs):
@@ -271,6 +275,7 @@ class TestPotProviderSupport:
             fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
 
         assert captured_opts["extractor_args"] == {
+            "youtube": {"fetch_pot": ["always"]},
             "youtubepot-bgutilhttp": {"base_url": ["http://bgutil-provider:4416"]},
         }
 
@@ -298,9 +303,22 @@ class TestPotProviderSupport:
             fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
 
         assert captured_opts["extractor_args"] == {
-            "youtube": {"player_client": ["android"]},
+            "youtube": {"player_client": ["android"], "fetch_pot": ["always"]},
             "youtubepot-bgutilhttp": {"base_url": ["http://bgutil-provider:4416"]},
         }
+
+    def test_fetch_policy_is_configurable(self, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(
+            monkeypatch, "http://bgutil-provider:4416", fetch_policy="never")
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info",
+                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
+            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
+
+        assert captured_opts["extractor_args"]["youtube"]["fetch_pot"] == ["never"]
 
     def test_download_passes_base_url_too(self, tmp_path, monkeypatch):
         captured_opts, fake_init = self._capture_opts(monkeypatch, "http://bgutil-provider:4416")

@@ -125,6 +125,17 @@ YOUTUBE_POT_PROVIDER_BASE_URL = os.getenv(
 	"YOUTUBE_POT_PROVIDER_BASE_URL", "http://bgutil-provider:4416"
 )
 
+# yt-dlp's youtube:fetch_pot extractor arg: never / auto / always. "auto"
+# (yt-dlp's own default) only fetches a PO Token when yt-dlp's internal
+# per-client/per-format policy marks it strictly "required" at the exact
+# call site that builds stream URLs - which the metadata-only lookup path
+# (fetch_video_metadata's skip_download) doesn't always reach, even for
+# clients whose policy says required=True (android included). "always"
+# forces the bgutil provider to be called on every request regardless, so
+# the token is actually generated and observable in logs instead of being
+# silently skipped by that heuristic.
+YOUTUBE_POT_FETCH_POLICY = os.getenv("YOUTUBE_POT_FETCH_POLICY", "always")
+
 
 # Basic application logging; LOG_LEVEL can be changed through .env.
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

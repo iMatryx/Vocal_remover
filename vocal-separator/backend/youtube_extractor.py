@@ -15,6 +15,7 @@ import yt_dlp
 from .config import (
 	YOUTUBE_MAX_DURATION_SECONDS,
 	YOUTUBE_PLAYER_CLIENTS,
+	YOUTUBE_POT_FETCH_POLICY,
 	YOUTUBE_POT_PROVIDER_BASE_URL,
 )
 
@@ -90,6 +91,13 @@ def _extractor_args() -> dict:
 	   "bgutil-provider" service. If that server is unreachable, the
 	   plugin logs a warning via _YtDlpLogger and yt-dlp proceeds without
 	   a token rather than failing the whole request.
+	3. YOUTUBE_POT_FETCH_POLICY: forces yt-dlp to actually call the
+	   provider (youtube:fetch_pot=always) instead of only doing so when
+	   its own internal policy heuristic decides a token is strictly
+	   required - which, for metadata-only lookups, it doesn't always do
+	   even for clients (android included) whose policy says required=True.
+	   Only set when a provider is actually configured, since forcing a
+	   fetch with nothing to serve it is pointless.
 
 	Neither configured -> no extractor_args, exactly as before either
 	workaround existed.
@@ -98,6 +106,7 @@ def _extractor_args() -> dict:
 	if YOUTUBE_PLAYER_CLIENTS:
 		args["youtube"] = {"player_client": YOUTUBE_PLAYER_CLIENTS}
 	if YOUTUBE_POT_PROVIDER_BASE_URL:
+		args.setdefault("youtube", {})["fetch_pot"] = [YOUTUBE_POT_FETCH_POLICY]
 		args["youtubepot-bgutilhttp"] = {"base_url": [YOUTUBE_POT_PROVIDER_BASE_URL]}
 	return {"extractor_args": args} if args else {}
 
