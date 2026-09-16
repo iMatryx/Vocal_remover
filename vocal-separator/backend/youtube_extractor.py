@@ -9,15 +9,25 @@ import logging
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
+import requests
 import yt_dlp
 
 from .config import (
+	COBALT_API_KEY,
+	COBALT_API_URL,
+	COBALT_DOWNLOAD_TIMEOUT_SECONDS,
+	COBALT_REQUEST_TIMEOUT_SECONDS,
 	YOUTUBE_MAX_DURATION_SECONDS,
 	YOUTUBE_PLAYER_CLIENTS,
 	YOUTUBE_POT_FETCH_POLICY,
 	YOUTUBE_POT_PROVIDER_BASE_URL,
 )
+
+# Cobalt only accepts these exact bitrate strings (docs/api.md#api-schema);
+# an arbitrary bitrate_kbps is snapped to the nearest one.
+_COBALT_AUDIO_BITRATES = (320, 256, 128, 96, 64, 8)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -187,28 +197,99 @@ def fetch_video_metadata(url: str) -> dict:
 	}
 
 
-def download_audio(
+def _download_via_cobalt(
 	url: str,
 	output_dir: Path,
-	bitrate_kbps: int = 320,
-	on_progress: Callable[[float], None] | None = None,
+	bitrate_kbps: int,
+	on_progress: Callable[[float], None] | None,
 ) -> Path:
 	"""
-	Download the audio-only stream and encode it to MP3 at bitrate_kbps.
-
-	Args:
-		url: YouTube URL (should already be validated by the caller)
-		output_dir: Directory to write the resulting MP3 into
-		bitrate_kbps: Target MP3 bitrate
-		on_progress: Optional callback(fraction: float 0.0-1.0) for download progress
-
-	Returns:
-		Path to the downloaded MP3 file
+	Downloads audio through a self-hosted Cobalt instance (COBALT_API_URL)
+	instead of yt-dlp. Cobalt's own server - hosted elsewhere, e.g. Render -
+	makes the actual request to YouTube from its own (non-datacenter) IP,
+	then hands back a URL to the already-processed MP3 for us to fetch
+	over a plain HTTP GET. Used when this server's IP is blocked outright
+	and player-client/PO-Token workarounds aren't enough on their own.
 
 	Raises:
-		VideoUnavailableError: If the download or extraction fails
-		YouTubeExtractionError: If the expected output file is missing afterward
+		VideoUnavailableError: If the Cobalt request or file download fails
+		YouTubeExtractionError: If Cobalt's response is malformed/unexpected
 	"""
+	bitrate = min(_COBALT_AUDIO_BITRATES, key=lambda b: abs(b - bitrate_kbps))
+	headers = {"Accept": "application/json", "Content-Type": "application/json"}
+	if COBALT_API_KEY:
+		headers["Authorization"] = f"Api-Key {COBALT_API_KEY}"
+
+	try:
+		response = requests.post(
+			COBALT_API_URL,
+			json={
+				"url": url,
+				"audioFormat": "mp3",
+				"audioBitrate": str(bitrate),
+				"downloadMode": "audio",
+			},
+			headers=headers,
+			timeout=COBALT_REQUEST_TIMEOUT_SECONDS,
+		)
+		response.raise_for_status()
+		result = response.json()
+	except requests.RequestException as e:
+		raise VideoUnavailableError(f"Cobalt API request failed: {e}") from e
+	except ValueError as e:
+		raise YouTubeExtractionError(f"Cobalt API returned invalid JSON: {e}") from e
+
+	status = result.get("status")
+	if status == "error":
+		error = result.get("error") or {}
+		raise VideoUnavailableError(f"Cobalt could not process this video: {error.get('code', 'unknown_error')}")
+	if status not in ("tunnel", "redirect"):
+		raise YouTubeExtractionError(f"Unexpected Cobalt response status: {status!r}")
+
+	download_url = result.get("url")
+	if not download_url:
+		raise YouTubeExtractionError("Cobalt response did not include a download URL")
+
+	output_dir.mkdir(parents=True, exist_ok=True)
+	# .name strips any path components Cobalt's response might contain -
+	# it's an external API response, not to be trusted as a safe path.
+	filename = Path(result.get("filename") or "").name
+	if not filename or filename in (".", ".."):
+		filename = f"{uuid4()}.mp3"
+	mp3_path = (output_dir / filename).with_suffix(".mp3")
+
+	try:
+		with requests.get(download_url, stream=True, timeout=COBALT_DOWNLOAD_TIMEOUT_SECONDS) as file_response:
+			file_response.raise_for_status()
+			total = int(file_response.headers.get("Content-Length") or 0)
+			downloaded = 0
+			with mp3_path.open("wb") as f:
+				for chunk in file_response.iter_content(chunk_size=1024 * 1024):
+					f.write(chunk)
+					downloaded += len(chunk)
+					if on_progress and total:
+						on_progress(min(downloaded / total, 1.0))
+	except requests.RequestException as e:
+		mp3_path.unlink(missing_ok=True)
+		raise VideoUnavailableError(f"Could not download file from Cobalt tunnel: {e}") from e
+
+	if not mp3_path.is_file() or mp3_path.stat().st_size == 0:
+		mp3_path.unlink(missing_ok=True)
+		raise YouTubeExtractionError("Cobalt tunnel download produced an empty or missing file")
+
+	LOGGER.info(
+		"Downloaded YouTube audio via Cobalt: %s (%.1f MB)", mp3_path.name, mp3_path.stat().st_size / (1024 * 1024)
+	)
+	return mp3_path
+
+
+def _download_via_ytdlp(
+	url: str,
+	output_dir: Path,
+	bitrate_kbps: int,
+	on_progress: Callable[[float], None] | None,
+) -> Path:
+	"""Original download path - see download_audio() for the public contract."""
 	output_dir.mkdir(parents=True, exist_ok=True)
 
 	def _hook(d: dict) -> None:
@@ -251,3 +332,33 @@ def download_audio(
 
 	LOGGER.info("Downloaded YouTube audio: %s (%.1f MB)", mp3_path.name, mp3_path.stat().st_size / (1024 * 1024))
 	return mp3_path
+
+
+def download_audio(
+	url: str,
+	output_dir: Path,
+	bitrate_kbps: int = 320,
+	on_progress: Callable[[float], None] | None = None,
+) -> Path:
+	"""
+	Download the audio-only stream and encode it to MP3 at bitrate_kbps.
+	Uses a self-hosted Cobalt instance when COBALT_API_URL is configured
+	(see config.py), otherwise yt-dlp directly - same public contract
+	either way, so callers (tasks.py) never need to know which one ran.
+
+	Args:
+		url: YouTube URL (should already be validated by the caller)
+		output_dir: Directory to write the resulting MP3 into
+		bitrate_kbps: Target MP3 bitrate
+		on_progress: Optional callback(fraction: float 0.0-1.0) for download progress
+
+	Returns:
+		Path to the downloaded MP3 file
+
+	Raises:
+		VideoUnavailableError: If the download or extraction fails
+		YouTubeExtractionError: If the expected output file is missing afterward
+	"""
+	if COBALT_API_URL:
+		return _download_via_cobalt(url, output_dir, bitrate_kbps, on_progress)
+	return _download_via_ytdlp(url, output_dir, bitrate_kbps, on_progress)

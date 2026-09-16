@@ -44,6 +44,11 @@ scipy==1.11.4
 # FFmpeg wrapper for advanced audio operations (optional but recommended)
 ffmpeg-python==0.2.0
 
+# HTTP client for the optional Cobalt API download path (youtube_extractor.py) -
+# was already installed transitively via yt-dlp, pinned explicitly here since
+# we now import and call it directly.
+requests==2.34.2
+
 # YouTube audio extraction (Feature 7) - updated frequently to keep up with
 # YouTube's internal changes; bump this if extraction starts failing.
 yt-dlp==2026.8.19

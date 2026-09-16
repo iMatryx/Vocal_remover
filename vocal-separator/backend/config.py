@@ -136,6 +136,28 @@ YOUTUBE_POT_PROVIDER_BASE_URL = os.getenv(
 # silently skipped by that heuristic.
 YOUTUBE_POT_FETCH_POLICY = os.getenv("YOUTUBE_POT_FETCH_POLICY", "always")
 
+# Base URL of a self-hosted Cobalt instance (https://github.com/imputnet/cobalt)
+# used as an alternative to yt-dlp for the actual audio *download* step
+# (fetch_video_metadata still uses yt-dlp - Cobalt's response doesn't
+# include duration/title). Cobalt's own server runs elsewhere (e.g.
+# Render) with a clean, non-datacenter IP, so it's the one YouTube sees
+# making the request, sidestepping this server's IP reputation entirely.
+# Empty (default) disables this path - download_audio() then uses yt-dlp
+# as before. Never defaults to a public/shared Cobalt instance: cobalt's
+# own docs explicitly ask that hosted instances like api.cobalt.tools not
+# be used by other projects without permission - this must be your own
+# self-hosted instance.
+COBALT_API_URL = os.getenv("COBALT_API_URL", "")
+
+# Only needed if your Cobalt instance is configured to require API-key
+# authentication. Sent as "Authorization: Api-Key <token>".
+COBALT_API_KEY = os.getenv("COBALT_API_KEY", "")
+
+# Timeouts for talking to the Cobalt instance: the initial POST that starts
+# processing, and the streamed download of the resulting file it hands back.
+COBALT_REQUEST_TIMEOUT_SECONDS = int(os.getenv("COBALT_REQUEST_TIMEOUT_SECONDS", "30"))
+COBALT_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("COBALT_DOWNLOAD_TIMEOUT_SECONDS", "300"))
+
 
 # Basic application logging; LOG_LEVEL can be changed through .env.
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
