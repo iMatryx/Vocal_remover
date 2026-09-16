@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 
-from .config import YOUTUBE_MAX_DURATION_SECONDS
+from .config import YOUTUBE_COOKIES_FILE, YOUTUBE_MAX_DURATION_SECONDS
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +40,19 @@ class VideoTooLongError(YouTubeExtractionError):
 class VideoUnavailableError(YouTubeExtractionError):
 	"""Raised when yt-dlp cannot fetch or download the video (private,
 	deleted, geo-restricted, age-restricted, etc.)."""
+
+
+def _cookie_opts() -> dict:
+	"""
+	yt-dlp options to authenticate as a logged-in browser session, if a
+	cookies.txt file has been placed at YOUTUBE_COOKIES_FILE. Works around
+	YouTube's "Sign in to confirm you're not a bot" check, which triggers
+	often on datacenter/server IPs. Absent by default - falls back to
+	cookie-less requests exactly like before.
+	"""
+	if Path(YOUTUBE_COOKIES_FILE).is_file():
+		return {"cookiefile": YOUTUBE_COOKIES_FILE}
+	return {}
 
 
 def validate_youtube_url(url: str) -> bool:
@@ -90,6 +103,7 @@ def fetch_video_metadata(url: str) -> dict:
 		"noplaylist": True,
 		"skip_download": True,
 		"socket_timeout": 30,
+		**_cookie_opts(),
 	}
 
 	try:
@@ -161,6 +175,7 @@ def download_audio(
 		"noplaylist": True,
 		"socket_timeout": 30,
 		"progress_hooks": [_hook],
+		**_cookie_opts(),
 	}
 
 	try:

@@ -32,3 +32,8 @@ Thumbs.db
 /backend/outputs/*
 !/backend/outputs/.gitkeep
 *.log
+
+# YouTube session cookies (sensitive - never commit)
+/backend/cookies/*
+!/backend/cookies/.gitkeep
+!/backend/cookies/README.md

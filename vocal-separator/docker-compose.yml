@@ -44,6 +44,7 @@ services:
     volumes:
       - ./backend/uploads:/app/backend/uploads
       - ./backend/outputs:/app/backend/outputs
+      - ./backend/cookies:/app/backend/cookies:ro
     networks:
       - vocal-net
 
@@ -75,6 +76,7 @@ services:
     volumes:
       - ./backend/uploads:/app/backend/uploads
       - ./backend/outputs:/app/backend/outputs
+      - ./backend/cookies:/app/backend/cookies:ro
     networks:
       - vocal-net
 

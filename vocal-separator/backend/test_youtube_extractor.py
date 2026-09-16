@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yt_dlp
 
+from . import youtube_extractor
 from .youtube_extractor import (
     validate_youtube_url,
     fetch_video_metadata,
@@ -171,6 +172,63 @@ class TestDownloadAudio:
         with patch.object(yt_dlp.YoutubeDL, "extract_info", return_value={"id": "nonexistent"}):
             with pytest.raises(YouTubeExtractionError):
                 download_audio("https://www.youtube.com/watch?v=abc12345678", tmp_path)
+
+
+class TestCookieSupport:
+    """cookiefile should be passed to yt-dlp only when the file configured
+    via YOUTUBE_COOKIES_FILE actually exists on disk - otherwise requests
+    go out exactly as before (no cookies)."""
+
+    @staticmethod
+    def _capture_opts(monkeypatch, cookies_path):
+        monkeypatch.setattr(youtube_extractor, "YOUTUBE_COOKIES_FILE", str(cookies_path))
+        captured_opts = {}
+
+        def fake_init(self, params=None, **kwargs):
+            captured_opts.update(params or {})
+            self.params = params or {}
+
+        return captured_opts, fake_init
+
+    def test_metadata_fetch_includes_cookiefile_when_present(self, tmp_path, monkeypatch):
+        cookies_file = tmp_path / "cookies.txt"
+        cookies_file.write_text("# Netscape HTTP Cookie File\n")
+        captured_opts, fake_init = self._capture_opts(monkeypatch, cookies_file)
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info",
+                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
+            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
+
+        assert captured_opts["cookiefile"] == str(cookies_file)
+
+    def test_metadata_fetch_omits_cookiefile_when_absent(self, tmp_path, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(monkeypatch, tmp_path / "missing.txt")
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info",
+                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
+            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
+
+        assert "cookiefile" not in captured_opts
+
+    def test_download_includes_cookiefile_when_present(self, tmp_path, monkeypatch):
+        cookies_file = tmp_path / "cookies.txt"
+        cookies_file.write_text("# Netscape HTTP Cookie File\n")
+        captured_opts, fake_init = self._capture_opts(monkeypatch, cookies_file)
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info", lambda self, url, download: {"id": "x"}):
+            (tmp_path / "x.mp3").write_bytes(b"fake")
+            download_audio("https://www.youtube.com/watch?v=abc12345678", tmp_path)
+
+        assert captured_opts["cookiefile"] == str(cookies_file)
 
 
 if __name__ == "__main__":

@@ -104,6 +104,14 @@ YOUTUBE_MAX_DURATION_SECONDS = int(os.getenv("YOUTUBE_MAX_DURATION_SECONDS", "90
 YOUTUBE_AUDIO_BITRATE_KBPS = int(os.getenv("YOUTUBE_AUDIO_BITRATE_KBPS", "320"))
 YOUTUBE_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("YOUTUBE_DOWNLOAD_TIMEOUT_SECONDS", "300"))
 
+# Netscape-format cookies.txt exported from a logged-in YouTube session, used
+# to get past YouTube's "Sign in to confirm you're not a bot" anti-bot check
+# (common when requests come from a datacenter/server IP). Optional: if the
+# file doesn't exist, yt-dlp runs without cookies as before.
+YOUTUBE_COOKIES_FILE = os.getenv(
+	"YOUTUBE_COOKIES_FILE", str(BASE_DIR / "cookies" / "youtube_cookies.txt")
+)
+
 
 # Basic application logging; LOG_LEVEL can be changed through .env.
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
