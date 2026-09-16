@@ -12,7 +12,11 @@ from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 
-from .config import YOUTUBE_MAX_DURATION_SECONDS, YOUTUBE_PLAYER_CLIENTS
+from .config import (
+	YOUTUBE_MAX_DURATION_SECONDS,
+	YOUTUBE_PLAYER_CLIENTS,
+	YOUTUBE_POT_PROVIDER_BASE_URL,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,18 +46,60 @@ class VideoUnavailableError(YouTubeExtractionError):
 	deleted, geo-restricted, age-restricted, etc.)."""
 
 
-def _player_client_opts() -> dict:
+class _YtDlpLogger:
 	"""
-	yt-dlp options requesting mobile app player clients (e.g. android)
-	instead of the web client. The web client gets YouTube's strictest
-	anti-bot check; mobile clients don't, so this dodges "Sign in to confirm
-	you're not a bot" without needing any account, cookies, or login -
-	though it's not guaranteed to keep working forever, since YouTube
-	tightens this over time.
+	Routes yt-dlp's internal messages (including the PO Token provider
+	plugin's own diagnostics - request attempts, generated tokens, server
+	errors) into this module's logger instead of stdout/stderr, so PO
+	Token retrieval can actually be observed in production logs rather
+	than silently succeeding or failing under `quiet`/`no_warnings`.
+	Matches yt-dlp's documented custom-logger duck type: debug/warning/
+	error, each taking one message string. Warnings/errors always reach
+	this (yt-dlp routes them here unconditionally once a logger is set);
+	debug-level messages - including the provider's token trace - only do
+	so because `verbose: True` is also set below. Actual visibility is
+	still gated centrally by LOG_LEVEL (config.py): quiet in production,
+	verbose the moment you set LOG_LEVEL=DEBUG to investigate a failure.
 	"""
-	if not YOUTUBE_PLAYER_CLIENTS:
-		return {}
-	return {"extractor_args": {"youtube": {"player_client": YOUTUBE_PLAYER_CLIENTS}}}
+
+	def debug(self, msg):
+		LOGGER.debug("[yt-dlp] %s", msg)
+
+	def warning(self, msg):
+		LOGGER.warning("[yt-dlp] %s", msg)
+
+	def error(self, msg):
+		LOGGER.error("[yt-dlp] %s", msg)
+
+
+def _extractor_args() -> dict:
+	"""
+	Builds yt-dlp's extractor_args, combining two independent anti-bot
+	workarounds. Both live under the single "extractor_args" ydl_opts key
+	(one per provider namespace), so they're merged here rather than in
+	separate dicts - naively unpacking two dicts that both set
+	"extractor_args" would silently drop one instead of merging them.
+
+	1. YOUTUBE_PLAYER_CLIENTS: request mobile app player clients (e.g.
+	   android) instead of the web client, which gets YouTube's strictest
+	   anti-bot check.
+	2. YOUTUBE_POT_PROVIDER_BASE_URL: points the bgutil-ytdlp-pot-provider
+	   plugin (pip-installed, auto-registered - see requirements.txt) at
+	   the companion PO Token server, since it runs in a separate
+	   container (not yt-dlp's localhost default) - see docker-compose.yml's
+	   "bgutil-provider" service. If that server is unreachable, the
+	   plugin logs a warning via _YtDlpLogger and yt-dlp proceeds without
+	   a token rather than failing the whole request.
+
+	Neither configured -> no extractor_args, exactly as before either
+	workaround existed.
+	"""
+	args = {}
+	if YOUTUBE_PLAYER_CLIENTS:
+		args["youtube"] = {"player_client": YOUTUBE_PLAYER_CLIENTS}
+	if YOUTUBE_POT_PROVIDER_BASE_URL:
+		args["youtubepot-bgutilhttp"] = {"base_url": [YOUTUBE_POT_PROVIDER_BASE_URL]}
+	return {"extractor_args": args} if args else {}
 
 
 def validate_youtube_url(url: str) -> bool:
@@ -101,10 +147,12 @@ def fetch_video_metadata(url: str) -> dict:
 	ydl_opts = {
 		"quiet": True,
 		"no_warnings": True,
+		"verbose": True,
+		"logger": _YtDlpLogger(),
 		"noplaylist": True,
 		"skip_download": True,
 		"socket_timeout": 30,
-		**_player_client_opts(),
+		**_extractor_args(),
 	}
 
 	try:
@@ -173,10 +221,12 @@ def download_audio(
 		],
 		"quiet": True,
 		"no_warnings": True,
+		"verbose": True,
+		"logger": _YtDlpLogger(),
 		"noplaylist": True,
 		"socket_timeout": 30,
 		"progress_hooks": [_hook],
-		**_player_client_opts(),
+		**_extractor_args(),
 	}
 
 	try:

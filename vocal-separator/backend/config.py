@@ -113,6 +113,18 @@ YOUTUBE_PLAYER_CLIENTS = [
 	c.strip() for c in os.getenv("YOUTUBE_PLAYER_CLIENTS", "android").split(",") if c.strip()
 ]
 
+# Base URL of the companion PO Token (Proof of Origin) provider server -
+# see docker-compose.yml's "bgutil-provider" service and
+# https://github.com/Brainicism/bgutil-ytdlp-pot-provider. Generates the
+# token YouTube's anti-bot checks increasingly require, without cookies or
+# a logged-in account. Consumed by the bgutil-ytdlp-pot-provider yt-dlp
+# plugin (pip-installed, auto-registers - see requirements.txt), which
+# degrades gracefully (logs a warning, no token) if this server is
+# unreachable, rather than failing the whole extraction. Empty disables it.
+YOUTUBE_POT_PROVIDER_BASE_URL = os.getenv(
+	"YOUTUBE_POT_PROVIDER_BASE_URL", "http://bgutil-provider:4416"
+)
+
 
 # Basic application logging; LOG_LEVEL can be changed through .env.
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

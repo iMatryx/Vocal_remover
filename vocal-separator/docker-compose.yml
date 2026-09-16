@@ -1,6 +1,26 @@
 name: vocal_remover
 
 services:
+  # PO Token (Proof of Origin) provider for yt-dlp - generates the token
+  # YouTube's anti-bot checks increasingly require, without cookies or a
+  # logged-in account. See backend/youtube_extractor.py's _extractor_args()
+  # and https://github.com/Brainicism/bgutil-ytdlp-pot-provider.
+  #
+  # Deliberately has NO "ports:" mapping: this server has no authentication
+  # of its own, and the project's README explicitly warns that exposing it
+  # beyond localhost lets anyone generate tokens through it, consume
+  # resources, or worse. Not publishing a port keeps it reachable only from
+  # backend/celery over the internal vocal-net bridge network (by service
+  # name, as http://bgutil-provider:4416) - never from the host's public
+  # interface. If it's ever unreachable, the yt-dlp plugin degrades
+  # gracefully (logs a warning, no token) instead of failing extraction.
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+    init: true
+    networks:
+      - vocal-net
+
   redis:
     image: redis:latest
     restart: unless-stopped
@@ -41,6 +61,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      bgutil-provider:
+        condition: service_started
     volumes:
       - ./backend/uploads:/app/backend/uploads
       - ./backend/outputs:/app/backend/outputs
@@ -72,6 +94,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      bgutil-provider:
+        condition: service_started
     volumes:
       - ./backend/uploads:/app/backend/uploads
       - ./backend/outputs:/app/backend/outputs

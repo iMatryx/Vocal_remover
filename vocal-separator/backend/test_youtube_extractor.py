@@ -182,6 +182,10 @@ class TestPlayerClientSupport:
     @staticmethod
     def _capture_opts(monkeypatch, clients):
         monkeypatch.setattr(youtube_extractor, "YOUTUBE_PLAYER_CLIENTS", clients)
+        # Isolated from the PO Token provider setting (covered separately
+        # in TestPotProviderSupport) so assertions here only ever see
+        # player_client in extractor_args.
+        monkeypatch.setattr(youtube_extractor, "YOUTUBE_POT_PROVIDER_BASE_URL", "")
         captured_opts = {}
 
         def fake_init(self, params=None, **kwargs):
@@ -237,6 +241,120 @@ class TestPlayerClientSupport:
             download_audio("https://www.youtube.com/watch?v=abc12345678", tmp_path)
 
         assert captured_opts["extractor_args"] == {"youtube": {"player_client": ["android"]}}
+
+
+class TestPotProviderSupport:
+    """extractor_args["youtubepot-bgutilhttp"].base_url should reflect
+    YOUTUBE_POT_PROVIDER_BASE_URL, merged alongside (not replacing)
+    player_client, since both live under the single extractor_args dict."""
+
+    @staticmethod
+    def _capture_opts(monkeypatch, base_url, clients=None):
+        monkeypatch.setattr(youtube_extractor, "YOUTUBE_POT_PROVIDER_BASE_URL", base_url)
+        monkeypatch.setattr(youtube_extractor, "YOUTUBE_PLAYER_CLIENTS", clients or [])
+        captured_opts = {}
+
+        def fake_init(self, params=None, **kwargs):
+            captured_opts.update(params or {})
+            self.params = params or {}
+
+        return captured_opts, fake_init
+
+    def test_base_url_is_passed_to_bgutil_provider(self, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(monkeypatch, "http://bgutil-provider:4416")
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info",
+                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
+            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
+
+        assert captured_opts["extractor_args"] == {
+            "youtubepot-bgutilhttp": {"base_url": ["http://bgutil-provider:4416"]},
+        }
+
+    def test_empty_base_url_omits_pot_provider_args(self, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(monkeypatch, "")
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info",
+                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
+            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
+
+        assert "extractor_args" not in captured_opts
+
+    def test_merges_with_player_client_instead_of_overwriting(self, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(
+            monkeypatch, "http://bgutil-provider:4416", clients=["android"])
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info",
+                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
+            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
+
+        assert captured_opts["extractor_args"] == {
+            "youtube": {"player_client": ["android"]},
+            "youtubepot-bgutilhttp": {"base_url": ["http://bgutil-provider:4416"]},
+        }
+
+    def test_download_passes_base_url_too(self, tmp_path, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(monkeypatch, "http://bgutil-provider:4416")
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info", lambda self, url, download: {"id": "x"}):
+            (tmp_path / "x.mp3").write_bytes(b"fake")
+            download_audio("https://www.youtube.com/watch?v=abc12345678", tmp_path)
+
+        assert captured_opts["extractor_args"]["youtubepot-bgutilhttp"] == {
+            "base_url": ["http://bgutil-provider:4416"],
+        }
+
+
+class TestYtDlpLogger:
+    """_YtDlpLogger should forward yt-dlp's messages into this module's
+    LOGGER, and both ydl_opts dicts should wire it up with verbose=True -
+    otherwise the PO Token provider's own debug/warning output (the only
+    real signal of whether a token was retrieved) never surfaces."""
+
+    def test_forwards_to_module_logger(self, caplog):
+        import logging
+        caplog.set_level(logging.DEBUG, logger="backend.youtube_extractor")
+
+        logger = youtube_extractor._YtDlpLogger()
+        logger.debug("debug message")
+        logger.warning("warning message")
+        logger.error("error message")
+
+        messages = [r.message for r in caplog.records]
+        assert any("debug message" in m for m in messages)
+        assert any("warning message" in m for m in messages)
+        assert any("error message" in m for m in messages)
+
+    def test_metadata_fetch_enables_verbose_logging(self, monkeypatch):
+        monkeypatch.setattr(youtube_extractor, "YOUTUBE_PLAYER_CLIENTS", [])
+        monkeypatch.setattr(youtube_extractor, "YOUTUBE_POT_PROVIDER_BASE_URL", "")
+        captured_opts = {}
+
+        def fake_init(self, params=None, **kwargs):
+            captured_opts.update(params or {})
+            self.params = params or {}
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info",
+                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
+            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
+
+        assert captured_opts["verbose"] is True
+        assert isinstance(captured_opts["logger"], youtube_extractor._YtDlpLogger)
 
 
 if __name__ == "__main__":

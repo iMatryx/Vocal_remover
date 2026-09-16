@@ -48,5 +48,13 @@ ffmpeg-python==0.2.0
 # YouTube's internal changes; bump this if extraction starts failing.
 yt-dlp==2026.8.19
 
+# yt-dlp plugin (auto-registers via the yt_dlp_plugins namespace, no import
+# needed in our code) that fetches PO Tokens from the companion
+# "bgutil-provider" service in docker-compose.yml, to get past YouTube's
+# newer anti-bot checks without cookies or an account. Check
+# https://github.com/Brainicism/bgutil-ytdlp-pot-provider for newer
+# versions - this is a fast-moving cat-and-mouse dependency.
+bgutil-ytdlp-pot-provider==2.0.0
+
 # Memory profiling for optimization monitoring (Phase 2)
 psutil==6.0.0
