@@ -61,7 +61,7 @@ services:
     restart: unless-stopped
     command: celery -A backend.tasks worker --loglevel=info --concurrency=1 --beat --schedule=/tmp/celerybeat-schedule
     # Hard ceiling so separation cannot saturate every core and overheat the host.
-    cpus: 6.0
+    cpus: 2.0
     env_file:
       - path: backend/.env
         required: false
@@ -93,7 +93,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "80:3000"
     depends_on:
       - backend
     networks:
@@ -125,3 +125,4 @@ volumes:
 networks:
   vocal-net:
     driver: bridge
+
