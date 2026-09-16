@@ -25,6 +25,7 @@ function AudioPreviewPlayer({
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
   const analyserRef = useRef(null);
+  const isPlayingRef = useRef(false);
 
   if (!taskId) {
     return null;
@@ -51,12 +52,16 @@ function AudioPreviewPlayer({
     setCurrentTime(seekTo.time);
   }, [seekTo]);
 
-  // Setup Web Audio API for waveform visualization
+  // Setup Web Audio API for waveform visualization. Runs once per mount,
+  // not per isActive change: createMediaElementAudioSource can only be
+  // called once ever for a given <audio> element - calling it again (e.g.
+  // after pausing and pressing play again) throws InvalidStateError.
   useEffect(() => {
-    if (!audioRef.current || !canvasRef.current || !isActive) return;
+    if (!audioRef.current || !canvasRef.current) return;
 
+    let audioContext;
     try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
 
@@ -68,7 +73,12 @@ function AudioPreviewPlayer({
     } catch (e) {
       console.warn('Web Audio API not available:', e);
     }
-  }, [isActive]);
+
+    return () => {
+      analyserRef.current = null;
+      audioContext?.close();
+    };
+  }, []);
 
   // Draw waveform visualization
   const drawWaveform = () => {
@@ -108,31 +118,32 @@ function AudioPreviewPlayer({
     ctx.lineTo(canvas.width, canvas.height / 2);
     ctx.stroke();
 
-    if (isPlaying) {
+    if (isPlayingRef.current) {
       requestAnimationFrame(drawWaveform);
     }
   };
 
-  // Handle changes in preview type
+  // Handle changes in preview type. isPlaying/onPlayStop are updated by the
+  // native onPause handler below, not set manually here - pause() always
+  // fires a real "pause" event, so there's one source of truth.
   const handlePreviewTypeChange = (type) => {
     if (audioRef.current) {
       audioRef.current.pause();
-      setIsPlaying(false);
-      if (onPlayStop) onPlayStop();
     }
     setPreviewType(type);
     setPreviewLoaded(false);
     setConnectionInterrupted(false);
   };
 
-  // Handle play/pause
+  // Handle play/pause. Only ever calls the DOM audio methods - isPlaying
+  // itself is derived solely from the <audio> element's own onPlay/onPause/
+  // onEnded events below, so this can never desync from what's actually
+  // playing (e.g. if play() is rejected or interrupted).
   const handlePlayPause = () => {
     if (!audioRef.current || isLoading) return;
 
     if (isPlaying) {
       audioRef.current.pause();
-      setIsPlaying(false);
-      if (onPlayStop) onPlayStop();
     } else {
       // Notify parent that this player is starting playback
       if (onPlayStart) onPlayStart();
@@ -143,8 +154,6 @@ function AudioPreviewPlayer({
         setError('Could not start playback');
         setIsBuffering(false);
       });
-      setIsPlaying(true);
-      drawWaveform();
     }
   };
 
@@ -241,11 +250,14 @@ function AudioPreviewPlayer({
             setIsLoading(false);
           }}
           onPlay={() => {
+            isPlayingRef.current = true;
             setIsPlaying(true);
             drawWaveform();
           }}
           onPause={() => {
+            isPlayingRef.current = false;
             setIsPlaying(false);
+            if (onPlayStop) onPlayStop();
           }}
           onTimeUpdate={(e) => {
             setCurrentTime(e.target.currentTime);
@@ -254,15 +266,19 @@ function AudioPreviewPlayer({
           onWaiting={() => setIsBuffering(true)}
           onPlaying={() => setIsBuffering(false)}
           onEnded={() => {
+            isPlayingRef.current = false;
             setIsPlaying(false);
             if (onPlayStop) onPlayStop();
           }}
           onError={(e) => {
             setError('Could not load audio preview');
+            isPlayingRef.current = false;
             setIsPlaying(false);
             setIsLoading(false);
+            setIsBuffering(false);
             setConnectionInterrupted(true);
           }}
+          onAbort={() => setIsBuffering(false)}
           crossOrigin="anonymous"
         />
 
@@ -290,18 +306,21 @@ function AudioPreviewPlayer({
 
         {/* Controls */}
         <div className="mb-4 flex items-center justify-between gap-4">
-          {/* Play/Pause Button */}
+          {/* Play/Pause Button. Only disabled while the initial metadata
+              load hasn't finished - buffering mid-playback must never block
+              the pause control, or a stuck buffering flag (e.g. after a
+              stream hiccup) would make the player unstoppable. */}
           <button
             onClick={handlePlayPause}
-            disabled={isLoading || isBuffering}
+            disabled={isLoading}
             className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold transition-all ${
-              !isLoading && !isBuffering
+              !isLoading
                 ? 'bg-primary-600 text-white hover:bg-primary-500'
                 : 'cursor-not-allowed bg-slate-700 text-slate-500 opacity-50'
             }`}
-            title={isLoading || isBuffering ? 'Still buffering...' : 'Play/Pause'}
+            title={isLoading ? 'Loading preview...' : isBuffering ? 'Buffering - click to pause' : 'Play/Pause'}
           >
-            {isLoading || isBuffering ? (
+            {isLoading ? (
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-white" />
             ) : isPlaying ? (
               '⏸'
