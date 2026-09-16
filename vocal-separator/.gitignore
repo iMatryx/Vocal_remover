@@ -32,14 +32,3 @@ Thumbs.db
 /backend/outputs/*
 !/backend/outputs/.gitkeep
 *.log
-
-# YouTube session cookies (sensitive - never commit)
-/backend/cookies/*
-!/backend/cookies/.gitkeep
-!/backend/cookies/README.md
-
-# Local placeholder for a bind-mounted browser profile (sensitive - never
-# commit; the real profile normally lives outside the repo on the host)
-/backend/browser_profile/*
-!/backend/browser_profile/.gitkeep
-!/backend/browser_profile/README.md

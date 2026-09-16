@@ -12,13 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 
-from .config import (
-	YOUTUBE_COOKIES_BROWSER,
-	YOUTUBE_COOKIES_BROWSER_PROFILE_DIR,
-	YOUTUBE_COOKIES_FILE,
-	YOUTUBE_COOKIES_KEYRING,
-	YOUTUBE_MAX_DURATION_SECONDS,
-)
+from .config import YOUTUBE_MAX_DURATION_SECONDS, YOUTUBE_PLAYER_CLIENTS
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,35 +42,18 @@ class VideoUnavailableError(YouTubeExtractionError):
 	deleted, geo-restricted, age-restricted, etc.)."""
 
 
-def _cookie_opts() -> dict:
+def _player_client_opts() -> dict:
 	"""
-	yt-dlp options to authenticate as a logged-in browser session, to work
-	around YouTube's "Sign in to confirm you're not a bot" check (common on
-	datacenter/server IPs). Two sources, checked in this order:
-
-	1. A local browser profile (YOUTUBE_COOKIES_BROWSER + a non-empty
-	   YOUTUBE_COOKIES_BROWSER_PROFILE_DIR mounted from the host) - reads
-	   cookies live, no manual export needed. Reliable only for Firefox-based
-	   browsers; see config.py for why Chromium-based ones usually can't be
-	   decrypted from inside this container.
-	2. A static YOUTUBE_COOKIES_FILE (cookies.txt export).
-
-	Neither configured -> requests go out without cookies, exactly as
-	before.
+	yt-dlp options requesting mobile app player clients (e.g. android)
+	instead of the web client. The web client gets YouTube's strictest
+	anti-bot check; mobile clients don't, so this dodges "Sign in to confirm
+	you're not a bot" without needing any account, cookies, or login -
+	though it's not guaranteed to keep working forever, since YouTube
+	tightens this over time.
 	"""
-	profile_dir = Path(YOUTUBE_COOKIES_BROWSER_PROFILE_DIR)
-	if YOUTUBE_COOKIES_BROWSER and profile_dir.is_dir() and any(profile_dir.iterdir()):
-		return {
-			"cookiesfrombrowser": (
-				YOUTUBE_COOKIES_BROWSER,
-				str(profile_dir),
-				YOUTUBE_COOKIES_KEYRING or None,
-				None,
-			)
-		}
-	if Path(YOUTUBE_COOKIES_FILE).is_file():
-		return {"cookiefile": YOUTUBE_COOKIES_FILE}
-	return {}
+	if not YOUTUBE_PLAYER_CLIENTS:
+		return {}
+	return {"extractor_args": {"youtube": {"player_client": YOUTUBE_PLAYER_CLIENTS}}}
 
 
 def validate_youtube_url(url: str) -> bool:
@@ -127,7 +104,7 @@ def fetch_video_metadata(url: str) -> dict:
 		"noplaylist": True,
 		"skip_download": True,
 		"socket_timeout": 30,
-		**_cookie_opts(),
+		**_player_client_opts(),
 	}
 
 	try:
@@ -199,7 +176,7 @@ def download_audio(
 		"noplaylist": True,
 		"socket_timeout": 30,
 		"progress_hooks": [_hook],
-		**_cookie_opts(),
+		**_player_client_opts(),
 	}
 
 	try:

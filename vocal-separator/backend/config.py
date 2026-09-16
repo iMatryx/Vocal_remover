@@ -104,41 +104,14 @@ YOUTUBE_MAX_DURATION_SECONDS = int(os.getenv("YOUTUBE_MAX_DURATION_SECONDS", "90
 YOUTUBE_AUDIO_BITRATE_KBPS = int(os.getenv("YOUTUBE_AUDIO_BITRATE_KBPS", "320"))
 YOUTUBE_DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("YOUTUBE_DOWNLOAD_TIMEOUT_SECONDS", "300"))
 
-# Netscape-format cookies.txt exported from a logged-in YouTube session, used
-# to get past YouTube's "Sign in to confirm you're not a bot" anti-bot check
-# (common when requests come from a datacenter/server IP). Optional: if the
-# file doesn't exist, yt-dlp runs without cookies as before.
-YOUTUBE_COOKIES_FILE = os.getenv(
-	"YOUTUBE_COOKIES_FILE", str(BASE_DIR / "cookies" / "youtube_cookies.txt")
-)
-
-# Alternative to YOUTUBE_COOKIES_FILE: read cookies live from a local
-# browser's profile instead of a static export. Set to a browser yt-dlp
-# supports (firefox, chrome, chromium, edge, brave, vivaldi, opera, safari,
-# whale) and bind-mount that browser's profile directory into the container
-# at YOUTUBE_COOKIES_BROWSER_PROFILE_DIR - see docker-compose.yml's
-# YOUTUBE_BROWSER_PROFILE_HOST_PATH. Takes priority over YOUTUBE_COOKIES_FILE
-# when both are configured.
-#
-# Only reliable for Firefox-based browsers: Firefox stores cookies
-# unencrypted on disk, but Chromium-based browsers (Chrome, Edge, Brave,
-# Vivaldi, Opera, Whale) encrypt them with a key held by the host OS
-# keychain (macOS Keychain, Windows DPAPI) - a Linux container has no way to
-# reach that, so decryption fails there. On a Linux host, Chromium cookies
-# may still be reachable via YOUTUBE_COOKIES_KEYRING below.
-YOUTUBE_COOKIES_BROWSER = os.getenv("YOUTUBE_COOKIES_BROWSER", "")
-
-# Container-side path where the host browser profile is mounted. Matches
-# docker-compose.yml's mount target by default - only override if you
-# changed that.
-YOUTUBE_COOKIES_BROWSER_PROFILE_DIR = os.getenv(
-	"YOUTUBE_COOKIES_BROWSER_PROFILE_DIR", str(BASE_DIR / "browser_profile")
-)
-
-# Linux-only keyring backend for decrypting Chromium-based browser cookies:
-# BASICTEXT, GNOMEKEYRING, KWALLET, KWALLET5, or KWALLET6. Leave blank for
-# Firefox, which doesn't need one.
-YOUTUBE_COOKIES_KEYRING = os.getenv("YOUTUBE_COOKIES_KEYRING", "")
+# yt-dlp player clients to request, comma-separated (e.g. "android,ios").
+# The mobile app clients get YouTube's lighter anti-bot check (unlike the
+# web client), which is what gets past "Sign in to confirm you're not a
+# bot" - no account, cookies, or login needed. Empty disables the override
+# (falls back to yt-dlp's own default clients).
+YOUTUBE_PLAYER_CLIENTS = [
+	c.strip() for c in os.getenv("YOUTUBE_PLAYER_CLIENTS", "android").split(",") if c.strip()
+]
 
 
 # Basic application logging; LOG_LEVEL can be changed through .env.

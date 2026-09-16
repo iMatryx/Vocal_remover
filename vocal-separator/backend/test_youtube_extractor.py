@@ -174,14 +174,14 @@ class TestDownloadAudio:
                 download_audio("https://www.youtube.com/watch?v=abc12345678", tmp_path)
 
 
-class TestCookieSupport:
-    """cookiefile should be passed to yt-dlp only when the file configured
-    via YOUTUBE_COOKIES_FILE actually exists on disk - otherwise requests
-    go out exactly as before (no cookies)."""
+class TestPlayerClientSupport:
+    """extractor_args.youtube.player_client should reflect YOUTUBE_PLAYER_CLIENTS,
+    passed to yt-dlp so requests present as a mobile app client instead of
+    the web client (the one YouTube's bot check targets)."""
 
     @staticmethod
-    def _capture_opts(monkeypatch, cookies_path):
-        monkeypatch.setattr(youtube_extractor, "YOUTUBE_COOKIES_FILE", str(cookies_path))
+    def _capture_opts(monkeypatch, clients):
+        monkeypatch.setattr(youtube_extractor, "YOUTUBE_PLAYER_CLIENTS", clients)
         captured_opts = {}
 
         def fake_init(self, params=None, **kwargs):
@@ -190,10 +190,8 @@ class TestCookieSupport:
 
         return captured_opts, fake_init
 
-    def test_metadata_fetch_includes_cookiefile_when_present(self, tmp_path, monkeypatch):
-        cookies_file = tmp_path / "cookies.txt"
-        cookies_file.write_text("# Netscape HTTP Cookie File\n")
-        captured_opts, fake_init = self._capture_opts(monkeypatch, cookies_file)
+    def test_default_android_client_is_requested(self, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(monkeypatch, ["android"])
 
         with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
              patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
@@ -202,10 +200,10 @@ class TestCookieSupport:
                           lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
             fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
 
-        assert captured_opts["cookiefile"] == str(cookies_file)
+        assert captured_opts["extractor_args"] == {"youtube": {"player_client": ["android"]}}
 
-    def test_metadata_fetch_omits_cookiefile_when_absent(self, tmp_path, monkeypatch):
-        captured_opts, fake_init = self._capture_opts(monkeypatch, tmp_path / "missing.txt")
+    def test_empty_list_omits_extractor_args(self, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(monkeypatch, [])
 
         with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
              patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
@@ -214,12 +212,22 @@ class TestCookieSupport:
                           lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
             fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
 
-        assert "cookiefile" not in captured_opts
+        assert "extractor_args" not in captured_opts
 
-    def test_download_includes_cookiefile_when_present(self, tmp_path, monkeypatch):
-        cookies_file = tmp_path / "cookies.txt"
-        cookies_file.write_text("# Netscape HTTP Cookie File\n")
-        captured_opts, fake_init = self._capture_opts(monkeypatch, cookies_file)
+    def test_multiple_clients_are_all_requested(self, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(monkeypatch, ["android", "ios"])
+
+        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
+             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
+             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
+             patch.object(yt_dlp.YoutubeDL, "extract_info",
+                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
+            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
+
+        assert captured_opts["extractor_args"] == {"youtube": {"player_client": ["android", "ios"]}}
+
+    def test_download_requests_configured_client(self, tmp_path, monkeypatch):
+        captured_opts, fake_init = self._capture_opts(monkeypatch, ["android"])
 
         with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
              patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
@@ -228,91 +236,7 @@ class TestCookieSupport:
             (tmp_path / "x.mp3").write_bytes(b"fake")
             download_audio("https://www.youtube.com/watch?v=abc12345678", tmp_path)
 
-        assert captured_opts["cookiefile"] == str(cookies_file)
-
-
-class TestBrowserCookieSupport:
-    """cookiesfrombrowser should be used when YOUTUBE_COOKIES_BROWSER is set
-    and its profile directory is mounted and non-empty, taking priority
-    over a configured cookiefile."""
-
-    @staticmethod
-    def _capture_opts(monkeypatch, browser, profile_dir, keyring=""):
-        monkeypatch.setattr(youtube_extractor, "YOUTUBE_COOKIES_BROWSER", browser)
-        monkeypatch.setattr(youtube_extractor, "YOUTUBE_COOKIES_BROWSER_PROFILE_DIR", str(profile_dir))
-        monkeypatch.setattr(youtube_extractor, "YOUTUBE_COOKIES_KEYRING", keyring)
-        captured_opts = {}
-
-        def fake_init(self, params=None, **kwargs):
-            captured_opts.update(params or {})
-            self.params = params or {}
-
-        return captured_opts, fake_init
-
-    def test_uses_browser_profile_when_present_and_non_empty(self, tmp_path, monkeypatch):
-        profile_dir = tmp_path / "profile"
-        profile_dir.mkdir()
-        (profile_dir / "cookies.sqlite").write_text("fake")
-        captured_opts, fake_init = self._capture_opts(monkeypatch, "firefox", profile_dir)
-
-        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
-             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
-             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
-             patch.object(yt_dlp.YoutubeDL, "extract_info",
-                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
-            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
-
-        assert captured_opts["cookiesfrombrowser"] == ("firefox", str(profile_dir), None, None)
-        assert "cookiefile" not in captured_opts
-
-    def test_passes_keyring_when_configured(self, tmp_path, monkeypatch):
-        profile_dir = tmp_path / "profile"
-        profile_dir.mkdir()
-        (profile_dir / "Cookies").write_text("fake")
-        captured_opts, fake_init = self._capture_opts(monkeypatch, "chrome", profile_dir, keyring="BASICTEXT")
-
-        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
-             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
-             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
-             patch.object(yt_dlp.YoutubeDL, "extract_info",
-                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
-            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
-
-        assert captured_opts["cookiesfrombrowser"] == ("chrome", str(profile_dir), "BASICTEXT", None)
-
-    def test_falls_back_to_cookiefile_when_profile_dir_empty(self, tmp_path, monkeypatch):
-        profile_dir = tmp_path / "profile"
-        profile_dir.mkdir()  # exists but empty
-        cookies_file = tmp_path / "cookies.txt"
-        cookies_file.write_text("# Netscape HTTP Cookie File\n")
-        captured_opts, fake_init = self._capture_opts(monkeypatch, "firefox", profile_dir)
-        monkeypatch.setattr(youtube_extractor, "YOUTUBE_COOKIES_FILE", str(cookies_file))
-
-        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
-             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
-             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
-             patch.object(yt_dlp.YoutubeDL, "extract_info",
-                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
-            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
-
-        assert "cookiesfrombrowser" not in captured_opts
-        assert captured_opts["cookiefile"] == str(cookies_file)
-
-    def test_falls_back_to_cookiefile_when_browser_not_configured(self, tmp_path, monkeypatch):
-        cookies_file = tmp_path / "cookies.txt"
-        cookies_file.write_text("# Netscape HTTP Cookie File\n")
-        captured_opts, fake_init = self._capture_opts(monkeypatch, "", tmp_path / "missing_profile")
-        monkeypatch.setattr(youtube_extractor, "YOUTUBE_COOKIES_FILE", str(cookies_file))
-
-        with patch.object(yt_dlp.YoutubeDL, "__init__", fake_init), \
-             patch.object(yt_dlp.YoutubeDL, "__enter__", lambda self: self), \
-             patch.object(yt_dlp.YoutubeDL, "__exit__", lambda self, *a: None), \
-             patch.object(yt_dlp.YoutubeDL, "extract_info",
-                          lambda self, url, download=False: {"title": "T", "duration": 10, "uploader": "U"}):
-            fetch_video_metadata("https://www.youtube.com/watch?v=abc12345678")
-
-        assert "cookiesfrombrowser" not in captured_opts
-        assert captured_opts["cookiefile"] == str(cookies_file)
+        assert captured_opts["extractor_args"] == {"youtube": {"player_client": ["android"]}}
 
 
 if __name__ == "__main__":
